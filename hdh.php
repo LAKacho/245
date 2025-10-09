@@ -30,6 +30,17 @@ function dir_safe($v){ return strtolower($v)==='asc'?'asc':'desc'; }
 function flash_set($msg){ $_SESSION['flash'] = $msg; }
 function flash_get(){ if(isset($_SESSION['flash'])){ $m=$_SESSION['flash']; unset($_SESSION['flash']); return $m; } return ""; }
 
+
+/* Helper: bind params with references */
+function stmt_bind_params($stmt, $types, $params){
+    $arr = [];
+    $arr[] = &$types;
+    foreach($params as $k => $v){
+        $arr[] = &$params[$k];
+    }
+    return call_user_func_array([$stmt, 'bind_param'], $arr);
+}
+
 /* ---------- Tabs ---------- */
 $allowedTabs = ['nastav','starchenstvo','mentorship','seniority','tests'];
 $tabLabels = [
@@ -102,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = mysqli_prepare($link, "INSERT INTO $table (user_login, date_added, added_by, is_active) VALUES (?, NOW(), ?, ?)");
             if (!$stmt){ flash_set('SQL ошибка: '.mysqli_error($link)); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$table); exit(); }
             $is_active = isset($_POST['is_active'])?1:0;
-            mysqli_stmt_bind_param($stmt, "ssi", $_POST['user_login'], $adminLogin, $is_active);
+            $_user_login = $_POST['user_login']; mysqli_stmt_bind_param($stmt, "ssi", $_user_login, $adminLogin, $is_active);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись добавлена" : "Ошибка: ".mysqli_error($link);
             mysqli_stmt_close($stmt);
@@ -112,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $is_active = isset($_POST['is_active'])?1:0;
             $stmt = mysqli_prepare($link, "UPDATE $table SET user_login=?, is_active=? WHERE id=?");
             if (!$stmt){ flash_set('SQL ошибка: '.mysqli_error($link)); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$table); exit(); }
-            mysqli_stmt_bind_param($stmt, "sii", $_POST['user_login'], $is_active, $id);
+            $_user_login = $_POST['user_login']; mysqli_stmt_bind_param($stmt, "sii", $_user_login, $is_active, $id);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись обновлена" : "Ошибка: ".mysqli_error($link);
             mysqli_stmt_close($stmt);
@@ -153,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['add_record'])) {
             $stmt = mysqli_prepare($link, "INSERT INTO $table (user_login, score, time_spent, attempt_number, test_date) VALUES (?, ?, ?, ?, ?)");
             if (!$stmt){ flash_set('SQL ошибка: '.mysqli_error($link)); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.($_GET['tab']??'mentorship')); exit(); }
-            mysqli_stmt_bind_param($stmt, "siiis", $_POST['user_login'], $score, (int)$_POST['time_spent'], (int)$_POST['attempt_number'], $test_date);
+            $_user_login = $_POST['user_login']; $_time_spent=(int)$_POST['time_spent']; $_attempt=(int)$_POST['attempt_number']; mysqli_stmt_bind_param($stmt, "siiis", $_user_login, $score, $_time_spent, $_attempt, $test_date);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись добавлена" : "Ошибка: ".mysqli_error($link);
             mysqli_stmt_close($stmt);
@@ -162,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $id = (int)$_POST['record_id'];
             $stmt = mysqli_prepare($link, "UPDATE $table SET user_login=?, score=?, time_spent=?, attempt_number=?, test_date=? WHERE id=?");
             if (!$stmt){ flash_set('SQL ошибка: '.mysqli_error($link)); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.($_GET['tab']??'mentorship')); exit(); }
-            mysqli_stmt_bind_param($stmt, "siiisi", $_POST['user_login'], $score, (int)$_POST['time_spent'], (int)$_POST['attempt_number'], $test_date, $id);
+            $_user_login = $_POST['user_login']; $_time_spent=(int)$_POST['time_spent']; $_attempt=(int)$_POST['attempt_number']; mysqli_stmt_bind_param($stmt, "siiisi", $_user_login, $score, $_time_spent, $_attempt, $test_date, $id);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись обновлена" : "Ошибка: ".mysqli_error($link);
             mysqli_stmt_close($stmt);
@@ -227,7 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sql = "UPDATE `{$table}` SET ".implode(", ", $sets)." WHERE `{$pk}`=?";
             $stmt = mysqli_prepare($linkTest, $sql);
             if (!$stmt){ flash_set('SQL ошибка: '.mysqli_error($linkTest)); header('Location: '.$_SERVER['PHP_SELF'].'?tab=tests&t='.$tkey); exit(); }
-            mysqli_stmt_bind_param($stmt, $bindTypes, ...$bindVals);
+            stmt_bind_params($stmt, $bindTypes, $bindVals);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Данные обновлены" : "Ошибка: ".mysqli_error($linkTest);
             mysqli_stmt_close($stmt);
@@ -269,14 +280,14 @@ if ($active_tab === 'nastav' || $active_tab === 'starchenstvo') {
     $params = []; $types="";
     if ($q!==""){ $where .= ($where?" AND ":"WHERE ")."user_login LIKE ?"; $params[]=$like; $types.="s"; }
     $countSql = "SELECT COUNT(*) FROM $table $where";
-    $stmt = mysqli_prepare($db, $countSql); if ($params) mysqli_stmt_bind_param($stmt, $types, ...$params);
+    $stmt = mysqli_prepare($db, $countSql); if ($params) stmt_bind_params($stmt, $types, $params);
     mysqli_stmt_execute($stmt); mysqli_stmt_bind_result($stmt, $totalRows); mysqli_stmt_fetch($stmt); mysqli_stmt_close($stmt);
     $totalPages = max(1, (int)ceil($totalRows / $limit));
     if ($page > $totalPages) $page = $totalPages;
     $offset = ($page - 1) * $limit;
     $listSql = "SELECT id,user_login,date_added,added_by,is_active FROM $table $where ORDER BY $sort $dir LIMIT ? OFFSET ?";
     $stmt = mysqli_prepare($db, $listSql);
-    if ($params){ $types2=$types.'ii'; $params2=$params; $params2[]=$limit; $params2[]=$offset; mysqli_stmt_bind_param($stmt, $types2, ...$params2); }
+    if ($params){ $types2=$types.'ii'; $params2=$params; $params2[]=$limit; $params2[]=$offset; stmt_bind_params($stmt, $types2, $params2); }
     else { mysqli_stmt_bind_param($stmt, "ii", $limit, $offset); }
     mysqli_stmt_execute($stmt); $res=mysqli_stmt_get_result($stmt); while($res && ($r=mysqli_fetch_assoc($res))) $rows[]=$r; mysqli_stmt_close($stmt);
 }
@@ -289,12 +300,12 @@ elseif ($active_tab === 'mentorship' || $active_tab === 'seniority') {
     $where = ""; $params=[]; $types="";
     if ($q!==""){ $where .= ($where?" AND ":"WHERE ")."user_login LIKE ?"; $params[]=$like; $types.="s"; }
     $countSql="SELECT COUNT(*) FROM $table $where";
-    $stmt=mysqli_prepare($db,$countSql); if($params) mysqli_stmt_bind_param($stmt,$types,...$params);
+    $stmt=mysqli_prepare($db,$countSql); if($params) stmt_bind_params($stmt, $types, $params);
     mysqli_stmt_execute($stmt); mysqli_stmt_bind_result($stmt,$totalRows); mysqli_stmt_fetch($stmt); mysqli_stmt_close($stmt);
     $totalPages=max(1,(int)ceil($totalRows/$limit)); if($page>$totalPages)$page=$totalPages; $offset=($page-1)*$limit;
     $listSql="SELECT id,user_login,score,time_spent,attempt_number,test_date FROM $table $where ORDER BY $sort $dir LIMIT ? OFFSET ?";
     $stmt=mysqli_prepare($db,$listSql);
-    if($params){ $types2=$types.'ii'; $params2=$params; $params2[]=$limit; $params2[]=$offset; mysqli_stmt_bind_param($stmt,$types2,...$params2); }
+    if($params){ $types2=$types.'ii'; $params2=$params; $params2[]=$limit; $params2[]=$offset; stmt_bind_params($stmt, $types2, $params2); }
     else { mysqli_stmt_bind_param($stmt,"ii",$limit,$offset); }
     mysqli_stmt_execute($stmt); $res=mysqli_stmt_get_result($stmt); while($res && ($r=mysqli_fetch_assoc($res))) $rows[]=$r; mysqli_stmt_close($stmt);
 }
@@ -317,7 +328,7 @@ else { /* tests */
     if (!empty($_GET['to'])){ $where .= ($where?" AND ":"WHERE ")."`sum` <= ?"; $params[]=$_GET['to'].' 23:59:59'; $types.="s"; }
 
     $countSql = "SELECT COUNT(*) FROM `{$table}` {$where}";
-    $stmt = mysqli_prepare($db, $countSql); if($params) mysqli_stmt_bind_param($stmt,$types,...$params);
+    $stmt = mysqli_prepare($db, $countSql); if($params) stmt_bind_params($stmt, $types, $params);
     mysqli_stmt_execute($stmt); mysqli_stmt_bind_result($stmt,$totalRows); mysqli_stmt_fetch($stmt); mysqli_stmt_close($stmt);
 
     $totalPages=max(1,(int)ceil($totalRows/$limit)); if($page>$totalPages)$page=$totalPages; $offset=($page-1)*$limit;
@@ -325,7 +336,7 @@ else { /* tests */
     $select = "`{$pk}` AS pk, ".implode(",", array_map(function($c){ return "`{$c}`"; }, $cols));
     $listSql = "SELECT {$select} FROM `{$table}` {$where} ORDER BY `{$sort}` {$dir} LIMIT ? OFFSET ?";
     $stmt = mysqli_prepare($db, $listSql);
-    if($params){ $types2=$types.'ii'; $params2=$params; $params2[]=$limit; $params2[]=$offset; mysqli_stmt_bind_param($stmt,$types2,...$params2); }
+    if($params){ $types2=$types.'ii'; $params2=$params; $params2[]=$limit; $params2[]=$offset; stmt_bind_params($stmt, $types2, $params2); }
     else { mysqli_stmt_bind_param($stmt,"ii",$limit,$offset); }
     mysqli_stmt_execute($stmt); $res=mysqli_stmt_get_result($stmt); while($res && ($r=mysqli_fetch_assoc($res))) $rows[]=$r; mysqli_stmt_close($stmt);
 }

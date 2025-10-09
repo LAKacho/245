@@ -1,6 +1,8 @@
 <?php
 session_start();
 if (!isset($_COOKIE['id_tpa'])) { header("Location: index.php"); exit(); }
+
+/* Подключения: основная (classnost) и тестовая (test) */
 $link = mysqli_connect("localhost", "root", "", "classnost");
 if (!$link) { die("Ошибка подключения: " . mysqli_connect_error()); }
 mysqli_set_charset($link, "utf8mb4");
@@ -11,6 +13,7 @@ mysqli_set_charset($linkTest, "utf8mb4");
 
 $use_cache = function_exists('apcu_fetch') || function_exists('apc_fetch');
 
+/* Аутентификация администратора */
 $adminLogin = $_COOKIE['id_tpa'];
 $stmt = mysqli_prepare($link, "SELECT 1 FROM administrators WHERE user_login=?");
 mysqli_stmt_bind_param($stmt, "s", $adminLogin);
@@ -19,9 +22,11 @@ mysqli_stmt_store_result($stmt);
 if (mysqli_stmt_num_rows($stmt) === 0) { header("Location: category.php"); exit(); }
 mysqli_stmt_close($stmt);
 
+/* CSRF */
 if (empty($_SESSION['csrf'])) { $_SESSION['csrf'] = bin2hex(random_bytes(32)); }
 $csrf = $_SESSION['csrf'];
 
+/* Навигация */
 $allowedTabs = ['nastav','starchenstvo','mentorship','seniority','tests'];
 $tabLabels = [
     'nastav' => 'Наставники',
@@ -33,8 +38,9 @@ $tabLabels = [
 $active_tab = $_GET['tab'] ?? 'mentorship';
 if (!in_array($active_tab, $allowedTabs, true)) $active_tab = 'mentorship';
 
+/* Модели тестов (DSM теперь sess1) */
 $testsModels = [
-    'dsm'        => ['label'=>'DSM',    'table'=>'dsm',        'pk'=>'index7', 'where'=>"level2 = 5"],
+    'dsm'        => ['label'=>'DSM',    'table'=>'sess1',      'pk'=>'index7', 'where'=>"level2 = 5"],
     'sess_dpk'   => ['label'=>'DPK',    'table'=>'sess_dpk',   'pk'=>'id',     'where'=>"level2 = 'test_dpk'"],
     'sess_sr'    => ['label'=>'SR',     'table'=>'sess_sr',    'pk'=>'id',     'where'=>"level2 = 'test'"],
     'sess_tdvs2' => ['label'=>'TDVS2',  'table'=>'sess_tdvs2', 'pk'=>'id',     'where'=>"level2 = 5"]
@@ -42,6 +48,7 @@ $testsModels = [
 $tests_key = $_GET['t'] ?? 'dsm';
 if (!isset($testsModels[$tests_key])) $tests_key = 'dsm';
 
+/* Утилиты */
 function sanitize_dir($v){ return strtolower($v)==='asc'?'asc':'desc'; }
 function esc($v){ return htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 function cache_get($k){ if (function_exists('apcu_fetch')) return apcu_fetch($k); if (function_exists('apc_fetch')) return apc_fetch($k); return false; }
@@ -68,18 +75,21 @@ function nearest_allowed($x){
     return $best;
 }
 
+/* POST-обработчик */
 $message = "";
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($_POST['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) { http_response_code(403); exit('CSRF'); }
     $current_admin = $adminLogin;
     $current_date = date('Y-m-d H:i:s');
 
+    /* Массовое удаление для наставников/старост */
     if (isset($_POST['bulk_action']) && !empty($_POST['selected_ids'])) {
         $selected_ids = array_map('intval', $_POST['selected_ids']);
         $ids_list = implode(',', $selected_ids);
         if ($_POST['bulk_action'] === 'delete' && ($active_tab === 'nastav' || $active_tab === 'starchenstvo')) {
             $table = $active_tab;
             $stmt = mysqli_prepare($link, "DELETE FROM $table WHERE id IN ($ids_list)");
+            if (!$stmt) { $_SESSION['flash'] = "SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Удалено записей: " . count($selected_ids) : "Ошибка: ".mysqli_error($link);
             if ($ok) { cache_ns_bump($table); logAdminAction($link, $current_admin, "BULK_DELETE", "Таблица: $table, ID: $ids_list"); }
@@ -87,12 +97,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    /* CRUD наставники/старосты */
     if ($active_tab === 'nastav' || $active_tab === 'starchenstvo') {
         $table = $active_tab;
+
         if (isset($_POST['add_record'])) {
             $user_login = trim($_POST['user_login']);
             $is_active = isset($_POST['is_active']) ? 1 : 0;
             $stmt = mysqli_prepare($link, "INSERT INTO $table (user_login, date_added, added_by, is_active) VALUES (?, ?, ?, ?)");
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             mysqli_stmt_bind_param($stmt, "sssi", $user_login, $current_date, $current_admin, $is_active);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись добавлена успешно!" : "Ошибка: ".mysqli_error($link);
@@ -102,6 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['delete_record'])) {
             $id = (int)$_POST['record_id'];
             $stmt = mysqli_prepare($link, "DELETE FROM $table WHERE id=?");
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             mysqli_stmt_bind_param($stmt, "i", $id);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись удалена успешно!" : "Ошибка: ".mysqli_error($link);
@@ -113,6 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user_login = trim($_POST['user_login']);
             $is_active = isset($_POST['is_active']) ? 1 : 0;
             $stmt = mysqli_prepare($link, "UPDATE $table SET user_login=?, is_active=? WHERE id=?");
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             mysqli_stmt_bind_param($stmt, "sii", $user_login, $is_active, $id);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись обновлена успешно!" : "Ошибка: ".mysqli_error($link);
@@ -123,6 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $id = (int)$_POST['record_id'];
             $new_status = (int)$_POST['new_status'];
             $stmt = mysqli_prepare($link, "UPDATE $table SET is_active=? WHERE id=?");
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             mysqli_stmt_bind_param($stmt, "ii", $new_status, $id);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Статус изменен успешно!" : "Ошибка: ".mysqli_error($link);
@@ -131,6 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    /* CRUD результаты (проценты) */
     if ($active_tab === 'mentorship' || $active_tab === 'seniority') {
         $table = ($active_tab === 'mentorship') ? 'mentorship_results' : 'seniority_results';
         $allowed = allowed_percents_15();
@@ -138,14 +155,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['add_record'])) {
             $user_login = trim($_POST['user_login']);
             $score_in = $_POST['score'] ?? '';
-            if ($score_in === '' || !is_numeric($score_in)) { $_SESSION['flash']="Некорректный процент"; header('Location: '.$_SERVER['PHP_SELF'].'?'.http_build_query(['tab'=>$active_tab])); exit(); }
+            if ($score_in === '' || !is_numeric($score_in)) { $_SESSION['flash']="Некорректный процент"; header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             $score = (int)$score_in;
-            if (!in_array($score, $allowed, true)) { $_SESSION['flash']="Процент должен быть одним из: ".implode(', ',$allowed); header('Location: '.$_SERVER['PHP_SELF'].'?'.http_build_query(['tab'=>$active_tab])); exit(); }
+            if (!in_array($score, $allowed, true)) { $_SESSION['flash']="Процент должен быть одним из: ".implode(', ',$allowed); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             $time_spent = (int)$_POST['time_spent'];
             $attempt_number = (int)$_POST['attempt_number'];
             $dt = DateTime::createFromFormat('Y-m-d\TH:i', $_POST['test_date']);
             $test_date = $dt ? $dt->format('Y-m-d H:i:s') : date('Y-m-d H:i:s');
             $stmt = mysqli_prepare($link, "INSERT INTO $table (user_login, score, time_spent, attempt_number, test_date) VALUES (?, ?, ?, ?, ?)");
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             mysqli_stmt_bind_param($stmt, "siiis", $user_login, $score, $time_spent, $attempt_number, $test_date);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись добавлена успешно!" : "Ошибка: ".mysqli_error($link);
@@ -156,6 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['delete_record'])) {
             $id = (int)$_POST['record_id'];
             $stmt = mysqli_prepare($link, "DELETE FROM $table WHERE id=?");
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             mysqli_stmt_bind_param($stmt, "i", $id);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись удалена успешно!" : "Ошибка: ".mysqli_error($link);
@@ -167,18 +186,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $id = (int)$_POST['record_id'];
             $user_login = trim($_POST['user_login']);
             $score_in = $_POST['score'] ?? '';
-            if ($score_in === '' || !is_numeric($score_in)) { $_SESSION['flash']="Некорректный процент"; header('Location: '.$_SERVER['PHP_SELF'].'?'.http_build_query(['tab'=>$active_tab])); exit(); }
+            if ($score_in === '' || !is_numeric($score_in)) { $_SESSION['flash']="Некорректный процент"; header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             $score = (int)$score_in;
-            if (!in_array($score, $allowed, true)) { $_SESSION['flash']="Процент должен быть одним из: ".implode(', ',$allowed); header('Location: '.$_SERVER['PHP_SELF'].'?'.http_build_query(['tab'=>$active_tab])); exit(); }
+            $allowed = allowed_percents_15();
+            if (!in_array($score, $allowed, true)) { $_SESSION['flash']="Процент должен быть одним из: ".implode(', ',$allowed); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             $time_spent = (int)$_POST['time_spent'];
             $attempt_number = (int)$_POST['attempt_number'];
             $dt = DateTime::createFromFormat('Y-m-d\TH:i', $_POST['test_date']);
             $test_date = $dt ? $dt->format('Y-m-d H:i:s') : date('Y-m-d H:i:s');
             $stmt = mysqli_prepare($link, "UPDATE $table SET user_login=?, score=?, time_spent=?, attempt_number=?, test_date=? WHERE id=?");
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($link); header('Location: '.$_SERVER['PHP_SELF'].'?tab='.$active_tab); exit(); }
             mysqli_stmt_bind_param($stmt, "siiisi", $user_login, $score, $time_spent, $attempt_number, $test_date, $id);
             $ok = mysqli_stmt_execute($stmt);
             $message = $ok ? "Запись обновлена успешно!" : "Ошибка: ".mysqli_error($link);
             if ($ok) { cache_ns_bump($table); logAdminAction($link, $current_admin, "UPDATE", "Таблица: $table, ID: $id"); }
+            mysqli_stmt_close($stmt);
+        }
+    }
+
+    /* Редактирование тестов */
+    if ($active_tab === 'tests') {
+        $tkey = $_POST['t'] ?? $tests_key;
+        if (!isset($testsModels[$tkey])) $tkey = 'dsm';
+        $m = $testsModels[$tkey];
+        $table = $m['table'];
+        $pk = $m['pk'];
+
+        if (isset($_POST['update_test'])) {
+            $id = (int)$_POST['record_pk'];
+            $user_login = trim($_POST['user_login']);
+            $error = (int)$_POST['error'];
+            $error2 = (int)$_POST['error2'];
+            $times = (int)$_POST['times'];
+            $dt = DateTime::createFromFormat('Y-m-d\TH:i', $_POST['time_test']);
+            $time_test = $dt ? $dt->format('Y-m-d H:i:s') : date('Y-m-d H:i:s');
+
+            $sql = "UPDATE `{$table}` SET `user_login`=?, `ERROR`=?, `Error2`=?, `times`=?, `TIME_TEST`=? WHERE `{$pk}`=?";
+            $stmt = mysqli_prepare($linkTest, $sql);
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($linkTest); header('Location: '.$_SERVER['PHP_SELF'].'?tab=tests&t='.$tkey); exit(); }
+            mysqli_stmt_bind_param($stmt, "siiisi", $user_login, $error, $error2, $times, $time_test, $id);
+            $ok = mysqli_stmt_execute($stmt);
+            $message = $ok ? "Данные обновлены" : "Ошибка: ".mysqli_error($linkTest);
+            if ($ok) { cache_ns_bump('tests_'.$tkey); logAdminAction($link, $adminLogin, "UPDATE_TEST", "Таблица test.$table, PK: $id"); }
+            mysqli_stmt_close($stmt);
+        }
+
+        if (isset($_POST['delete_test'])) {
+            $id = (int)$_POST['record_pk'];
+            $sql = "DELETE FROM `{$table}` WHERE `{$pk}`=?";
+            $stmt = mysqli_prepare($linkTest, $sql);
+            if (!$stmt) { $_SESSION['flash']="SQL ошибка: ".mysqli_error($linkTest); header('Location: '.$_SERVER['PHP_SELF'].'?tab=tests&t='.$tkey); exit(); }
+            mysqli_stmt_bind_param($stmt, "i", $id);
+            $ok = mysqli_stmt_execute($stmt);
+            $message = $ok ? "Запись удалена" : "Ошибка: ".mysqli_error($linkTest);
+            if ($ok) { cache_ns_bump('tests_'.$tkey); logAdminAction($link, $adminLogin, "DELETE_TEST", "Таблица test.$table, PK: $id"); }
             mysqli_stmt_close($stmt);
         }
     }
@@ -199,17 +260,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit();
 }
 
+/* flash */
 if (isset($_SESSION['flash'])) { $message = $_SESSION['flash']; unset($_SESSION['flash']); }
 
+/* Параметры списка */
 $limit = 25;
 $page = max(1, (int)($_GET['page'] ?? 1));
 $q = trim($_GET['q'] ?? '');
 $status_filter = $_GET['status'] ?? 'all';
 $like = '%'.$q.'%';
-
 $fromDate = trim($_GET['from'] ?? '');
 $toDate = trim($_GET['to'] ?? '');
 
+/* Определяем таблицу/колонки активной вкладки */
 if ($active_tab === 'nastav' || $active_tab === 'starchenstvo') {
     $table = $active_tab;
     $columns = ['id','user_login','date_added','added_by','is_active'];
@@ -229,16 +292,18 @@ if ($active_tab === 'nastav' || $active_tab === 'starchenstvo') {
     $sortAllow = ['user_login','error','error2','times','time_test'];
 }
 
+/* Сортировка */
 $sort = $_GET['sort'] ?? ($active_tab==='tests' ? 'time_test' : 'id');
 if (!in_array($sort, $sortAllow, true)) $sort = $active_tab==='tests' ? 'time_test' : 'id';
 $dir = sanitize_dir($_GET['dir'] ?? 'desc');
 
+/* WHERE */
 $where_conditions = [];
 $params = [];
 $types = '';
 
 if ($active_tab === 'tests') {
-    $where_conditions[] = $testsModels[$tests_key]['where'];
+    $where_conditions[] = $testsModels[$tests_key]['where']; // base_where
     if ($q !== '') { $where_conditions[] = "`user_login` LIKE ?"; $params[] = $like; $types .= 's'; }
     if ($fromDate !== '') { $where_conditions[] = "`TIME_TEST` >= ?"; $params[] = $fromDate.' 00:00:00'; $types .= 's'; }
     if ($toDate !== '') { $where_conditions[] = "`TIME_TEST` <= ?"; $params[] = $toDate.' 23:59:59'; $types .= 's'; }
@@ -253,32 +318,36 @@ if ($active_tab === 'tests') {
 }
 $where = $where_conditions ? "WHERE " . implode(' AND ', $where_conditions) : "";
 
+/* Кэш-неймспейс */
 $nsTableForCache = ($active_tab==='tests' ? 'tests_'.$tests_key : $table);
 $ns = $use_cache ? cache_ns_get($nsTableForCache) : 0;
 
-if ($active_tab === 'tests') {
-    $countSql = "SELECT COUNT(*) FROM `{$table}` {$where}";
-} else {
-    $countSql = "SELECT COUNT(*) FROM {$table} {$where}";
-}
-
+/* COUNT */
+$countSql = ($active_tab === 'tests')
+    ? "SELECT COUNT(*) FROM `{$table}` {$where}"
+    : "SELECT COUNT(*) FROM {$table} {$where}";
 $cache_key_count = "{$nsTableForCache}_{$ns}_count_" . md5($where . serialize($params));
 if ($use_cache && ($cached_count = cache_get($cache_key_count)) !== false) {
     $totalRows = $cached_count;
 } else {
     $stmt = mysqli_prepare($db, $countSql);
-    if ($params) { mysqli_stmt_bind_param($stmt, $types, ...$params); }
-    mysqli_stmt_execute($stmt);
-    mysqli_stmt_bind_result($stmt, $totalRows);
-    mysqli_stmt_fetch($stmt);
-    mysqli_stmt_close($stmt);
-    if ($use_cache) { cache_set($cache_key_count, $totalRows, 60); }
+    if (!$stmt) { $message = "SQL ошибка: ".mysqli_error($db); $totalRows = 0; }
+    else{
+        if ($params) { mysqli_stmt_bind_param($stmt, $types, ...$params); }
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_bind_result($stmt, $totalRows);
+        mysqli_stmt_fetch($stmt);
+        mysqli_stmt_close($stmt);
+        if ($use_cache) { cache_set($cache_key_count, $totalRows, 60); }
+    }
 }
 
+/* Пагинация */
 $totalPages = max(1, (int)ceil($totalRows / $limit));
 if ($page > $totalPages) $page = $totalPages;
 $offset = ($page - 1) * $limit;
 
+/* SELECT */
 $cache_key_data = "{$nsTableForCache}_{$ns}_data_" . md5(serialize([$where, $params, $sort, $dir, $limit, $offset]));
 if ($use_cache && ($cached_data = cache_get($cache_key_data)) !== false) {
     $rows = $cached_data;
@@ -289,26 +358,30 @@ if ($use_cache && ($cached_data = cache_get($cache_key_data)) !== false) {
                     FROM `{$table}` {$where}
                     ORDER BY {$orderExpr} {$dir} LIMIT ? OFFSET ?";
         $stmt = mysqli_prepare($db, $listSql);
-    } elseif ($active_tab === 'nastav' || $active_tab === 'starchenstvo') {
-        $selectCols = implode(',', $columns);
-        $listSql = "SELECT $selectCols FROM $table $where ORDER BY $sort $dir LIMIT ? OFFSET ?";
-        $stmt = mysqli_prepare($db, $listSql);
     } else {
         $selectCols = implode(',', $columns);
         $listSql = "SELECT $selectCols FROM $table $where ORDER BY $sort $dir LIMIT ? OFFSET ?";
         $stmt = mysqli_prepare($db, $listSql);
     }
-    $all_params = $params; $all_types = $types;
-    if ($params) { $all_types .= 'ii'; $all_params[] = $limit; $all_params[] = $offset; mysqli_stmt_bind_param($stmt, $all_types, ...$all_params); }
-    else { mysqli_stmt_bind_param($stmt, "ii", $limit, $offset); }
-    mysqli_stmt_execute($stmt);
-    $res = mysqli_stmt_get_result($stmt);
-    $rows = [];
-    while ($res && ($r = mysqli_fetch_assoc($res))) { $rows[] = $r; }
-    mysqli_stmt_close($stmt);
-    if ($use_cache) { cache_set($cache_key_data, $rows, 30); }
+    if (!$stmt) {
+        $rows = [];
+        $message = "SQL ошибка: ".mysqli_error($db);
+    } else {
+        $all_params = $params; $all_types = $types;
+        if ($params) { $all_types .= 'ii'; $all_params[] = $limit; $all_params[] = $offset; mysqli_stmt_bind_param($stmt, $all_types, ...$all_params); }
+        else { mysqli_stmt_bind_param($stmt, "ii", $limit, $offset); }
+        mysqli_stmt_execute($stmt);
+        $res = mysqli_stmt_get_result($stmt);
+        $rows = [];
+        if ($res) {
+            while ($r = mysqli_fetch_assoc($res)) { $rows[] = $r; }
+        }
+        mysqli_stmt_close($stmt);
+        if ($use_cache) { cache_set($cache_key_data, $rows, 30); }
+    }
 }
 
+/* Заголовки, колонки */
 if ($active_tab === 'tests') {
     $table_name = 'Тесты — ' . $testsModels[$tests_key]['label'];
     $table_columns = ['Табельный №','Ошибки','Оценка','Время (сек)','Дата теста'];
@@ -342,15 +415,14 @@ body{margin:0;background:linear-gradient(135deg,#0b1020 0%,#0f172a 60%,#0b1226 1
 .user{font-size:14px;color:var(--muted)}
 .card{background:rgba(17,24,39,0.8);border:1px solid var(--border);border-radius:14px;backdrop-filter:blur(6px)}
 .tabs{display:flex;flex-wrap:wrap;gap:8px;padding:12px;border-bottom:1px solid var(--border)}
-.tab{padding:10px 14px;border:1px solid var(--border);border-radius:999px;background:#0b1226;color:#cbd5e1;cursor:pointer;user-select:none}
+.tab{padding:10px 14px;border:1px solid var(--border);border-radius:999px;background:#0b1226;color:var(--text);cursor:pointer;user-select:none}
 .tab:hover{background:#0e1630}
 .tab.active{background:var(--accent);color:white;border-color:transparent}
 .panel{padding:16px 16px 8px 16px}
 .title{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .title h2{margin:0;font-size:18px}
-.actions-bar{display:flex;gap:8px;flex-wrap:wrap}
 .search{display:flex;gap:8px;align-items:center;width:100%}
-.search input{flex:1;min-width:200px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0b1226;color:var(--text)}
+.search input, .search select{flex:1;min-width:200px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0b1226;color:var(--text)}
 .search button,.btn{padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0b1226;color:var(--text);cursor:pointer}
 .btn-primary{background:var(--accent);border-color:transparent;color:white}
 .btn-primary:hover{filter:brightness(1.1)}
@@ -363,36 +435,21 @@ body{margin:0;background:linear-gradient(135deg,#0b1020 0%,#0f172a 60%,#0b1226 1
 table{width:100%;border-collapse:separate;border-spacing:0}
 thead th{position:sticky;top:0;background:#0b1226;border-bottom:1px solid var(--border);padding:12px;text-align:left;font-size:13px;color:#cbd5e1;z-index:1}
 tbody td{border-bottom:1px solid var(--border);padding:12px;font-size:14px}
-tbody tr{cursor:pointer}
 tbody tr:hover{background:#0c1328}
-tbody tr.selected{background:rgba(59,130,246,.1);border-left:3px solid var(--accent)}
 th .th-btn{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
 .sort-indicator{font-size:10px;opacity:.7}
-.badge{padding:4px 8px;border-radius:999px;font-size:12px;display:inline-block;cursor:pointer}
-.badge-ok{background:rgba(34,197,94,.15);color:#86efac;border:1px solid rgba(34,197,94,.3)}
-.badge-off{background:rgba(239,68,68,.15);color:#fecaca;border:1px solid rgba(239,68,68,.3)}
-.badge-loading{background:rgba(156,163,175,.15);color:#d1d5db;border:1px solid rgba(156,163,175,.3)}
 .row-actions{display:flex;gap:6px}
 .edit-form{display:none;background:#0b1226;border-top:1px dashed var(--border)}
 .form-row{display:flex;gap:12px}
 .form-row > div{flex:1}
 .form-group label{display:block;margin:6px 0 6px 0;font-size:13px;color:#cbd5e1}
-.form-group input, .form-group select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0b1226;color:#var(--text)}
-.switch{display:flex;align-items:center;gap:8px}
+.form-group input, .form-group select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0b1226;color:var(--text)}
 .pagination{display:flex;gap:6px;align-items:center;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--border)}
 .page{padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:#0b1226;color:#cbd5e1;text-decoration:none}
 .page.active{background:var(--accent);border-color:transparent;color:white}
 .page:hover{background:#0e1630}
-.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.filters{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
-.filter-btn{padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:#0b1226;color:#cbd5e1;cursor:pointer;font-size:13px}
-.filter-btn.active{background:var(--accent);color:white;border-color:transparent}
-.bulk-actions{display:none;gap:8px;align-items:center;padding:10px;background:rgba(59,130,246,.05);border-radius:8px;margin:10px 0}
-.bulk-actions.show{display:flex}
-hr.sep{border:0;border-top:1px solid var(--border);margin:14px 0}
-.loading{opacity:0.6;pointer-events:none}
 .subtabs{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
-.subtab{padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#0b1226;color:#cbd5e1;cursor:pointer}
+.subtab{padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:#0b1226;color:#cbd5e1;cursor:pointer;text-decoration:none}
 .subtab.active{background:var(--accent);color:white;border-color:transparent}
 </style>
 </head>
@@ -446,14 +503,6 @@ hr.sep{border:0;border-top:1px solid var(--border);margin:14px 0}
                 </div>
             </div>
 
-            <?php if ($active_tab === 'nastav' || $active_tab === 'starchenstvo'): ?>
-            <div class="filters">
-                <button class="filter-btn <?php echo $status_filter==='all'?'active':''; ?>" onclick="setFilter('all')">Все</button>
-                <button class="filter-btn <?php echo $status_filter==='active'?'active':''; ?>" onclick="setFilter('active')">Активные</button>
-                <button class="filter-btn <?php echo $status_filter==='inactive'?'active':''; ?>" onclick="setFilter('inactive')">Неактивные</button>
-            </div>
-            <?php endif; ?>
-
             <?php if ($active_tab==='tests'): ?>
             <form class="search" method="GET">
                 <input type="hidden" name="tab" value="tests">
@@ -485,16 +534,13 @@ hr.sep{border:0;border-top:1px solid var(--border);margin:14px 0}
                     <?php if ($active_tab == 'nastav' || $active_tab == 'starchenstvo'): ?>
                         <div class="form-row">
                             <div class="form-group"><label>Логин пользователя</label><input type="text" name="user_login" required></div>
-                            <div class="form-group switch" style="margin-top:28px">
+                            <div class="form-group" style="margin-top:28px">
                                 <label><input type="checkbox" name="is_active" checked> Активен</label>
                             </div>
                         </div>
                     <?php else: ?>
                         <div class="form-row">
-                            <div class="form-group">
-                                <label>Логин пользователя</label>
-                                <input type="text" name="user_login" required>
-                            </div>
+                            <div class="form-group"><label>Логин пользователя</label><input type="text" name="user_login" required></div>
                             <div class="form-group">
                                 <label>Процент правильных ответов</label>
                                 <select name="score" required>
@@ -519,55 +565,79 @@ hr.sep{border:0;border-top:1px solid var(--border);margin:14px 0}
                 <table id="dataTable">
                     <thead>
                         <tr>
-                            <?php
-                            foreach ($table_columns as $i=>$col):
-                                $key = $sortKeys[$i];
-                                $isActive = $sort===$key;
-                                $arrow = $isActive ? ($dir==='asc'?'▲':'▼') : '';
-                            ?>
-                            <th data-sort="<?php echo esc($key); ?>"><span class="th-btn" onclick="clickSort('<?php echo esc($key); ?>')"><?php echo esc($col); ?> <span class="sort-indicator"><?php echo esc($arrow); ?></span></span></th>
+                            <?php foreach ($table_columns as $i=>$col): $key = $sortKeys[$i]; $isActive = $sort===$key; $arrow = $isActive ? ($dir==='asc'?'▲':'▼') : ''; ?>
+                            <th><span class="th-btn" onclick="clickSort('<?php echo esc($key); ?>')"><?php echo esc($col); ?> <span class="sort-indicator"><?php echo esc($arrow); ?></span></span></th>
                             <?php endforeach; ?>
-                            <?php if ($active_tab!=='tests'): ?>
-                            <th>Действия</th>
-                            <?php endif; ?>
+                            <th><?php echo $active_tab==='tests' ? 'Действия' : 'Действия'; ?></th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if ($active_tab==='tests'): ?>
-                            <?php foreach ($rows as $row): $rid = $row['pk']; ?>
-                            <tr id="row-tests-<?php echo (int)$rid; ?>">
-                                <td data-type="string"><?php echo esc($row['user_login']); ?></td>
-                                <td data-type="number"><?php echo (int)$row['error']; ?></td>
-                                <td data-type="number"><?php echo (int)$row['error2']; ?></td>
-                                <td data-type="number"><?php echo (int)$row['times']; ?></td>
+                            <?php foreach ($rows as $row): $rid = (int)$row['pk']; ?>
+                            <tr id="row-tests-<?php echo $rid; ?>">
+                                <td><?php echo esc($row['user_login']); ?></td>
+                                <td><?php echo (int)$row['error']; ?></td>
+                                <td><?php echo (int)$row['error2']; ?></td>
+                                <td><?php echo (int)$row['times']; ?></td>
                                 <td data-type="date" data-order="<?php echo (int)strtotime($row['time_test']); ?>"><?php echo esc($row['time_test']); ?></td>
+                                <td class="row-actions">
+                                    <button class="btn" onclick="toggleEditForm('tests-<?php echo $rid; ?>', event)">Изменить</button>
+                                    <form method="POST" style="display:inline">
+                                        <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                                        <input type="hidden" name="t" value="<?php echo esc($tests_key); ?>">
+                                        <input type="hidden" name="record_pk" value="<?php echo $rid; ?>">
+                                        <button class="btn btn-danger" type="submit" name="delete_test" onclick="return confirm('Удалить запись?')">Удалить</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <tr id="edit-form-tests-<?php echo $rid; ?>" class="edit-form">
+                                <td colspan="<?php echo count($table_columns) + 1; ?>">
+                                    <div style="padding:16px">
+                                        <h3 style="margin-top:0">Редактирование #<?php echo $rid; ?></h3>
+                                        <form method="POST">
+                                            <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                                            <input type="hidden" name="t" value="<?php echo esc($tests_key); ?>">
+                                            <input type="hidden" name="record_pk" value="<?php echo $rid; ?>">
+                                            <div class="form-row">
+                                                <div class="form-group"><label>Табельный номер</label><input type="text" name="user_login" value="<?php echo esc($row['user_login']); ?>" required></div>
+                                                <div class="form-group"><label>Ошибки (ERROR)</label><input type="number" name="error" value="<?php echo (int)$row['error']; ?>" required></div>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group"><label>Оценка (Error2)</label><input type="number" name="error2" value="<?php echo (int)$row['error2']; ?>" required></div>
+                                                <div class="form-group"><label>Время (сек)</label><input type="number" name="times" value="<?php echo (int)$row['times']; ?>" required></div>
+                                            </div>
+                                            <div class="form-group"><label>Дата/время теста</label><input type="datetime-local" name="time_test" value="<?php echo date('Y-m-d\TH:i', strtotime($row['time_test'])); ?>" required></div>
+                                            <div class="tools"><button class="btn btn-primary" type="submit" name="update_test">Сохранить</button><button class="btn" type="button" onclick="toggleEditForm('tests-<?php echo $rid; ?>')">Отмена</button></div>
+                                        </form>
+                                    </div>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                             <?php if (!$rows): ?>
-                            <tr><td colspan="<?php echo count($table_columns); ?>" style="color:#94a3b8">Нет данных</td></tr>
+                            <tr><td colspan="<?php echo count($table_columns)+1; ?>" style="color:#94a3b8">Нет данных</td></tr>
                             <?php endif; ?>
                         <?php else: ?>
                             <?php foreach ($rows as $row): ?>
-                            <tr id="row-<?php echo (int)$row['id']; ?>" onclick="toggleRowSelection(<?php echo (int)$row['id']; ?>, event)">
+                            <tr id="row-<?php echo (int)$row['id']; ?>">
                                 <?php if ($active_tab == 'nastav' || $active_tab == 'starchenstvo'): ?>
-                                    <td data-type="number"><?php echo (int)$row['id']; ?></td>
-                                    <td data-type="string"><?php echo esc($row['user_login']); ?></td>
+                                    <td><?php echo (int)$row['id']; ?></td>
+                                    <td><?php echo esc($row['user_login']); ?></td>
                                     <td data-type="date" data-order="<?php echo (int)strtotime($row['date_added']); ?>"><?php echo esc($row['date_added']); ?></td>
-                                    <td data-type="string"><?php echo esc($row['added_by']); ?></td>
-                                    <td data-type="number" data-status="<?php echo (int)$row['is_active']; ?>">
-                                        <span class="badge <?php echo ((int)$row['is_active'])?'badge-ok':'badge-off'; ?>" onclick="toggleStatus(<?php echo (int)$row['id']; ?>, <?php echo ((int)$row['is_active'])?0:1; ?>, event)"><?php echo ((int)$row['is_active'])?'Активен':'Неактивен'; ?></span>
+                                    <td><?php echo esc($row['added_by']); ?></td>
+                                    <td>
+                                        <span class="btn" onclick="toggleStatus(<?php echo (int)$row['id']; ?>, <?php echo ((int)$row['is_active'])?0:1; ?>)"><?php echo ((int)$row['is_active'])?'Активен':'Неактивен'; ?></span>
                                     </td>
                                 <?php else: ?>
                                     <?php $score_disp = nearest_allowed((float)$row['score']); ?>
-                                    <td data-type="number"><?php echo (int)$row['id']; ?></td>
-                                    <td data-type="string"><?php echo esc($row['user_login']); ?></td>
-                                    <td data-type="number"><?php echo $score_disp; ?>%</td>
-                                    <td data-type="number"><?php echo (int)$row['time_spent']; ?></td>
-                                    <td data-type="number"><?php echo (int)$row['attempt_number']; ?></td>
+                                    <td><?php echo (int)$row['id']; ?></td>
+                                    <td><?php echo esc($row['user_login']); ?></td>
+                                    <td><?php echo $score_disp; ?>%</td>
+                                    <td><?php echo (int)$row['time_spent']; ?></td>
+                                    <td><?php echo (int)$row['attempt_number']; ?></td>
                                     <td data-type="date" data-order="<?php echo (int)strtotime($row['test_date']); ?>"><?php echo esc($row['test_date']); ?></td>
                                 <?php endif; ?>
                                 <td class="row-actions">
-                                    <button class="btn" onclick="toggleEditForm(<?php echo (int)$row['id']; ?>, event)">Изменить</button>
+                                    <button class="btn" onclick="toggleEditForm(<?php echo (int)$row['id']; ?>)">Изменить</button>
                                     <form method="POST" style="display:inline">
                                         <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
                                         <input type="hidden" name="record_id" value="<?php echo (int)$row['id']; ?>">
@@ -585,7 +655,7 @@ hr.sep{border:0;border-top:1px solid var(--border);margin:14px 0}
                                             <?php if ($active_tab == 'nastav' || $active_tab == 'starchenstvo'): ?>
                                                 <div class="form-row">
                                                     <div class="form-group"><label>Логин пользователя</label><input type="text" name="user_login" value="<?php echo esc($row['user_login']); ?>" required></div>
-                                                    <div class="form-group switch" style="margin-top:28px">
+                                                    <div class="form-group" style="margin-top:28px">
                                                         <label><input type="checkbox" name="is_active" <?php echo ((int)$row['is_active'])?'checked':''; ?>> Активен</label>
                                                     </div>
                                                 </div>
@@ -593,8 +663,7 @@ hr.sep{border:0;border-top:1px solid var(--border);margin:14px 0}
                                                 <?php $sel_score = nearest_allowed((float)$row['score']); ?>
                                                 <div class="form-row">
                                                     <div class="form-group"><label>Логин пользователя</label><input type="text" name="user_login" value="<?php echo esc($row['user_login']); ?>" required></div>
-                                                    <div class="form-group">
-                                                        <label>Процент правильных ответов</label>
+                                                    <div class="form-group"><label>Процент правильных ответов</label>
                                                         <select name="score" required>
                                                             <?php foreach ($allowed_percent_values as $p): ?>
                                                                 <option value="<?php echo $p; ?>" <?php echo ($p==$sel_score)?'selected':''; ?>><?php echo $p; ?>%</option>
@@ -647,18 +716,11 @@ hr.sep{border:0;border-top:1px solid var(--border);margin:14px 0}
 
 <script>
 const CSRF_TOKEN="<?php echo esc($csrf); ?>";
-let selectedRows = new Set();
 function goTab(tab){const u=new URL(location.href);u.searchParams.set('tab',tab);u.searchParams.set('page','1');if(tab!=='tests'){u.searchParams.delete('t');u.searchParams.delete('from');u.searchParams.delete('to');}location.href=u.toString();}
-function setFilter(status){const u=new URL(location.href);u.searchParams.set('status',status);u.searchParams.set('page','1');location.href=u.toString();}
 function toggleAddForm(){const f=document.getElementById('addForm');if(!f)return;f.style.display=f.style.display==='block'?'none':'block'}
-function toggleEditForm(id,event){if(event){event.stopPropagation();}const f=document.getElementById('edit-form-'+id);f.style.display=f.style.display==='table-row'?'none':'table-row'}
+function toggleEditForm(id,event){if(event){event.stopPropagation();}const f=document.getElementById('edit-form-'+id);if(!f)return;f.style.display=f.style.display==='table-row'?'none':'table-row'}
 function clickSort(key){const u=new URL(location.href);const cur=u.searchParams.get('sort')||'id';let dir=u.searchParams.get('dir')||'desc';if(cur===key){dir=dir==='asc'?'desc':'asc'}else{dir='asc'}u.searchParams.set('sort',key);u.searchParams.set('dir',dir);u.searchParams.set('page','1');location.href=u.toString()}
-function toggleStatus(id,newStatus,event){if(event)event.stopPropagation();if(!confirm('Изменить статус?'))return;const badge=document.querySelector(`#row-${id} .badge`);if(badge){badge.innerHTML='⏳';badge.className='badge badge-loading';}setTimeout(()=>{const f=document.createElement('form');f.method='POST';f.style.display='none';const h=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i)};h('csrf',CSRF_TOKEN);h('record_id',id);h('new_status',newStatus);h('toggle_status','1');document.body.appendChild(f);f.submit();},100);}
-function toggleRowSelection(id,event){if(event.target.tagName==='INPUT'||event.target.closest('button')||event.target.closest('form')||event.target.classList.contains('badge')){return;}const row=document.getElementById(`row-${id}`);if(!row)return;if(selectedRows.has(id)){selectedRows.delete(id);row.classList.remove('selected');}else{selectedRows.add(id);row.classList.add('selected');}updateBulkActions();}
-function updateBulkActions(){const count=selectedRows.size;const bulkActions=document.getElementById('bulkActions');if(!bulkActions)return;const selectedCount=document.getElementById('selectedCount');selectedCount.textContent=`${count} записей выбрано`;if(count>0){bulkActions.classList.add('show');}else{bulkActions.classList.remove('show');}}
-function clearSelection(){selectedRows.clear();document.querySelectorAll('tbody tr.selected').forEach(row=>{row.classList.remove('selected');});updateBulkActions();}
-function bulkDelete(){if(selectedRows.size===0)return;if(!confirm(`Удалить ${selectedRows.size} выбранных записей?`))return;const f=document.createElement('form');f.method='POST';f.style.display='none';const h=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i)};h('csrf',CSRF_TOKEN);h('bulk_action','delete');Array.from(selectedRows).forEach(id=>{const i=document.createElement('input');i.type='hidden';i.name='selected_ids[]';i.value=id;f.appendChild(i);});document.body.appendChild(f);f.submit();}
-document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('form').forEach(form=>{form.addEventListener('submit',function(){const btn=this.querySelector('button[type="submit"]');if(btn){btn.classList.add('btn-loading');btn.disabled=true;}});});document.querySelectorAll('.edit-form').forEach(form=>{form.style.display='none';});});
+function toggleStatus(id,newStatus){if(!confirm('Изменить статус?'))return;const f=document.createElement('form');f.method='POST';f.style.display='none';const h=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i)};h('csrf',CSRF_TOKEN);h('record_id',id);h('new_status',newStatus);h('toggle_status','1');document.body.appendChild(f);f.submit();}
 </script>
 </body>
 </html>

@@ -739,5 +739,524 @@ textarea{min-height:90px}
                 ?>">Сброс</a>
             </form>
 
-            <!-- Add forms -->
-            <?php if
+                        <!-- Add forms -->
+            <?php
+            $showAdd = true;
+
+            if ($active_tab==='nastav' || $active_tab==='starchenstvo'): ?>
+                <div id="addForm" class="edit-form" style="padding:16px;border-top:1px solid var(--border);margin-top:12px;border-radius:10px">
+                    <h3 style="margin:0 0 8px">Добавить запись</h3>
+                    <form method="POST">
+                        <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                        <input type="hidden" name="scope" value="staff">
+                        <input type="hidden" name="table" value="<?php echo esc($active_tab); ?>">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Логин пользователя</label>
+                                <input type="text" name="user_login" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Статус</label>
+                                <select name="is_active">
+                                    <option value="1">Активен</option>
+                                    <option value="0">Неактивен</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="tools">
+                            <button class="btn btn-primary" type="submit" name="add_record">Сохранить</button>
+                            <button class="btn" type="button" onclick="toggleAddForm()">Отмена</button>
+                        </div>
+                    </form>
+                </div>
+
+            <?php elseif ($active_tab==='mentorship' || $active_tab==='seniority'):
+                $allowed_percent_values = allowed_percents_15(); ?>
+                <div id="addForm" class="edit-form" style="padding:16px;border-top:1px solid var(--border);margin-top:12px;border-radius:10px">
+                    <h3 style="margin:0 0 8px">Добавить запись</h3>
+                    <form method="POST">
+                        <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                        <input type="hidden" name="scope" value="results">
+                        <input type="hidden" name="table" value="<?php echo $active_tab==='mentorship'?'mentorship_results':'seniority_results'; ?>">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Логин пользователя</label>
+                                <input type="text" name="user_login" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Процент правильных ответов</label>
+                                <select name="score" required>
+                                    <?php foreach ($allowed_percent_values as $p): ?>
+                                        <option value="<?php echo $p; ?>"><?php echo $p; ?>%</option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Время (сек)</label>
+                                <input type="number" name="time_spent" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Номер попытки</label>
+                                <input type="number" name="attempt_number" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Дата теста</label>
+                            <input type="datetime-local" name="test_date" required>
+                        </div>
+                        <div class="tools">
+                            <button class="btn btn-primary" type="submit" name="add_record">Сохранить</button>
+                            <button class="btn" type="button" onclick="toggleAddForm()">Отмена</button>
+                        </div>
+                    </form>
+                </div>
+
+            <?php elseif ($active_tab==='tests'):
+                $m = $testsModels[$tests_key];
+                $cols = $m['columns'];
+                ?>
+                <div id="addForm" class="edit-form" style="padding:16px;border-top:1px solid var(--border);margin-top:12px;border-radius:10px">
+                    <h3 style="margin:0 0 8px">Добавить запись (<?php echo esc($m['label']); ?>)</h3>
+                    <form method="POST">
+                        <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                        <input type="hidden" name="scope" value="tests">
+                        <input type="hidden" name="t" value="<?php echo esc($tests_key); ?>">
+                        <div class="form-row">
+                        <?php foreach ($cols as $c):
+                            $type = $m['types'][$c] ?? 'text';
+                            $label = $m['labels'][$c] ?? $c;
+                            ?>
+                            <div class="form-group">
+                                <label><?php echo esc($label); ?></label>
+                                <?php if ($type==='datetime'): ?>
+                                    <input type="datetime-local" name="<?php echo esc($c); ?>">
+                                <?php elseif ($type==='int'): ?>
+                                    <input type="number" name="<?php echo esc($c); ?>">
+                                <?php elseif ($type==='longtext'): ?>
+                                    <textarea name="<?php echo esc($c); ?>"></textarea>
+                                <?php else: ?>
+                                    <input type="text" name="<?php echo esc($c); ?>">
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                        </div>
+                        <div class="tools">
+                            <button class="btn btn-primary" type="submit" name="add_test">Сохранить</button>
+                            <button class="btn" type="button" onclick="toggleAddForm()">Отмена</button>
+                        </div>
+                    </form>
+                </div>
+
+            <?php elseif ($active_tab==='xtvr'):
+                $m = $xtvrModels[$xtvr_key];
+                $cols = $m['columns'];
+                ?>
+                <div id="addForm" class="edit-form" style="padding:16px;border-top:1px solid var(--border);margin-top:12px;border-radius:10px">
+                    <h3 style="margin:0 0 8px">Добавить запись (<?php echo esc($m['label']); ?>)</h3>
+                    <form method="POST">
+                        <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                        <input type="hidden" name="scope" value="xtvr">
+                        <input type="hidden" name="x" value="<?php echo esc($xtvr_key); ?>">
+                        <div class="form-row">
+                        <?php foreach ($cols as $c):
+                            $type = $m['types'][$c] ?? 'text';
+                            $label = $m['labels'][$c] ?? $c; ?>
+                            <div class="form-group">
+                                <label><?php echo esc($label); ?></label>
+                                <?php if ($type==='datetime'): ?>
+                                    <input type="datetime-local" name="<?php echo esc($c); ?>">
+                                <?php elseif ($type==='int'): ?>
+                                    <input type="number" name="<?php echo esc($c); ?>">
+                                <?php elseif ($type==='longtext'): ?>
+                                    <textarea name="<?php echo esc($c); ?>"></textarea>
+                                <?php else: ?>
+                                    <input type="text" name="<?php echo esc($c); ?>">
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                        </div>
+                        <div class="tools">
+                            <button class="btn btn-primary" type="submit" name="add_xtvr">Сохранить</button>
+                            <button class="btn" type="button" onclick="toggleAddForm()">Отмена</button>
+                        </div>
+                    </form>
+                </div>
+
+            <?php else: // tpatb динамически
+                if ($tpa_tbl) {
+                    $metaAdd = tpa_table_meta($linkTPA,$tpa_tbl);
+                    $cols = array_keys($metaAdd['columns']);
+                ?>
+                <div id="addForm" class="edit-form" style="padding:16px;border-top:1px solid var(--border);margin-top:12px;border-radius:10px">
+                    <h3 style="margin:0 0 8px">Добавить запись — <?php echo esc($tpa_tbl); ?></h3>
+                    <form method="POST">
+                        <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                        <input type="hidden" name="scope" value="tpatb">
+                        <input type="hidden" name="p" value="<?php echo esc($tpa_tbl); ?>">
+                        <div class="form-row">
+                            <?php foreach ($cols as $c):
+                                $info = $metaAdd['columns'][$c]; $type = $info['type'];
+                                $isPK = ($metaAdd['pk']===$c);
+                                $auto = $metaAdd['auto_inc'] && $isPK;
+                                if ($auto) continue; ?>
+                                <div class="form-group">
+                                    <label><?php echo esc($c); ?><?php echo $isPK?' (PK)':''; ?></label>
+                                    <?php if (is_dt_type($type)): ?>
+                                        <input type="datetime-local" name="<?php echo esc($c); ?>">
+                                    <?php elseif (is_int_type($type) || is_float_type($type)): ?>
+                                        <input type="number" step="<?php echo is_float_type($type)?'0.01':'1'; ?>" name="<?php echo esc($c); ?>">
+                                    <?php else: ?>
+                                        <input type="text" name="<?php echo esc($c); ?>">
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="tools">
+                            <button class="btn btn-primary" type="submit" name="add_tpa">Сохранить</button>
+                            <button class="btn" type="button" onclick="toggleAddForm()">Отмена</button>
+                        </div>
+                    </form>
+                </div>
+                <?php } ?>
+            <?php endif; ?>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <?php
+                            // Итоговый список заголовков
+                            $headers = $table_columns;
+                            // Для динамических разделов добавим "Действия"
+                            foreach ($headers as $i=>$hdr):
+                                $key = isset($sortKeys[$i]) ? $sortKeys[$i] : (is_array($sortKeys)?($sortKeys[$i]??''):'');
+                                $isActive = $sort===$key;
+                                $arrow = $isActive ? ($dir==='asc'?'▲':'▼') : '';
+                            ?>
+                                <th>
+                                    <?php if ($key): ?>
+                                        <span class="th-btn" onclick="clickSort('<?php echo esc($key); ?>')">
+                                            <?php echo esc($hdr); ?> <span class="sort-indicator"><?php echo esc($arrow); ?></span>
+                                        </span>
+                                    <?php else: ?>
+                                        <?php echo esc($hdr); ?>
+                                    <?php endif; ?>
+                                </th>
+                            <?php endforeach; ?>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (!$rows): ?>
+                            <tr><td colspan="<?php echo count($table_columns)+1; ?>" style="color:#94a3b8">Нет данных</td></tr>
+                        <?php else: foreach ($rows as $r): ?>
+                            <tr id="row-<?php echo esc($r['pk'] ?? $r['id'] ?? ('k'.md5(json_encode($r)))); ?>">
+                                <?php if ($active_tab==='nastav' || $active_tab==='starchenstvo'): ?>
+                                    <td><?php echo (int)$r['id']; ?></td>
+                                    <td><?php echo esc($r['user_login']); ?></td>
+                                    <td><?php echo esc($r['date_added']); ?></td>
+                                    <td><?php echo esc($r['added_by']); ?></td>
+                                    <td>
+                                        <span class="btn" style="padding:4px 8px" onclick="toggleEditForm('<?php echo (int)$r['id']; ?>')">
+                                            <?php echo $r['is_active']?'Активен':'Неактивен'; ?>
+                                        </span>
+                                    </td>
+
+                                <?php elseif ($active_tab==='mentorship' || $active_tab==='seniority'): ?>
+                                    <td><?php echo (int)$r['id']; ?></td>
+                                    <td><?php echo esc($r['user_login']); ?></td>
+                                    <td><?php echo (int)$r['score']; ?>%</td>
+                                    <td><?php echo (int)$r['time_spent']; ?></td>
+                                    <td><?php echo (int)$r['attempt_number']; ?></td>
+                                    <td><?php echo esc($r['test_date']); ?></td>
+
+                                <?php elseif ($active_tab==='tests'):
+                                    $m = $testsModels[$tests_key];
+                                    foreach ($m['columns'] as $c):
+                                        $type = $m['types'][$c] ?? 'text';
+                                        $val = $r[$c] ?? '';
+                                        echo '<td>'.esc($val).'</td>';
+                                    endforeach;
+
+                                elseif ($active_tab==='xtvr'):
+                                    $m = $xtvrModels[$xtvr_key];
+                                    foreach ($m['columns'] as $c):
+                                        $val = $r[$c] ?? '';
+                                        echo '<td>'.esc($val).'</td>';
+                                    endforeach;
+
+                                else: // tpatb
+                                    $metaRow = tpa_table_meta($linkTPA,$tpa_tbl);
+                                    foreach (array_keys($metaRow['columns']) as $c):
+                                        $val = $r[$c] ?? '';
+                                        echo '<td>'.esc($val).'</td>';
+                                    endforeach;
+                                endif; ?>
+
+                                <td style="white-space:nowrap">
+                                    <button class="btn" onclick="toggleEditForm('<?php echo esc($r['pk'] ?? $r['id'] ?? ('k'.md5(json_encode($r)))); ?>')">Изменить</button>
+                                    <form method="POST" style="display:inline" onsubmit="return confirm('Удалить запись?')">
+                                        <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+                                        <?php if ($active_tab==='nastav' || $active_tab==='starchenstvo'): ?>
+                                            <input type="hidden" name="scope" value="staff">
+                                            <input type="hidden" name="table" value="<?php echo esc($active_tab); ?>">
+                                            <input type="hidden" name="record_id" value="<?php echo (int)$r['id']; ?>">
+                                            <button class="btn btn-danger" name="delete_record">Удалить</button>
+                                        <?php elseif ($active_tab==='mentorship' || $active_tab==='seniority'): ?>
+                                            <input type="hidden" name="scope" value="results">
+                                            <input type="hidden" name="table" value="<?php echo $active_tab==='mentorship'?'mentorship_results':'seniority_results'; ?>">
+                                            <input type="hidden" name="record_id" value="<?php echo (int)$r['id']; ?>">
+                                            <button class="btn btn-danger" name="delete_record">Удалить</button>
+                                        <?php elseif ($active_tab==='tests'): ?>
+                                            <input type="hidden" name="scope" value="tests">
+                                            <input type="hidden" name="t" value="<?php echo esc($tests_key); ?>">
+                                            <input type="hidden" name="record_pk" value="<?php echo esc($r['pk']); ?>">
+                                            <button class="btn btn-danger" name="delete_test">Удалить</button>
+                                        <?php elseif ($active_tab==='xtvr'): ?>
+                                            <input type="hidden" name="scope" value="xtvr">
+                                            <input type="hidden" name="x" value="<?php echo esc($xtvr_key); ?>">
+                                            <input type="hidden" name="record_pk" value="<?php echo esc($r['pk']); ?>">
+                                            <button class="btn btn-danger" name="delete_xtvr">Удалить</button>
+                                        <?php else: ?>
+                                            <input type="hidden" name="scope" value="tpatb">
+                                            <input type="hidden" name="p" value="<?php echo esc($tpa_tbl); ?>">
+                                            <?php $metaRow = tpa_table_meta($linkTPA,$tpa_tbl); ?>
+                                            <?php if (!empty($metaRow['pk'])): ?>
+                                                <input type="hidden" name="record_pk" value="<?php echo esc($r[$metaRow['pk']]); ?>">
+                                                <button class="btn btn-danger" name="delete_tpa">Удалить</button>
+                                            <?php endif; ?>
+                                        <?php endif; ?>
+                                    </form>
+                                </td>
+                            </tr>
+
+                            <!-- Edit form row -->
+                            <tr id="edit-<?php echo esc($r['pk'] ?? $r['id'] ?? ('k'.md5(json_encode($r)))); ?>" class="edit-form">
+                                <td colspan="<?php echo count($table_columns)+1; ?>">
+                                    <div style="padding:16px">
+                                        <h3 style="margin:0 0 8px">Редактирование</h3>
+                                        <form method="POST">
+                                            <input type="hidden" name="csrf" value="<?php echo esc($csrf); ?>">
+
+                                            <?php if ($active_tab==='nastav' || $active_tab==='starchenstvo'): ?>
+                                                <input type="hidden" name="scope" value="staff">
+                                                <input type="hidden" name="table" value="<?php echo esc($active_tab); ?>">
+                                                <input type="hidden" name="record_id" value="<?php echo (int)$r['id']; ?>">
+                                                <div class="form-row">
+                                                    <div class="form-group">
+                                                        <label>Логин пользователя</label>
+                                                        <input type="text" name="user_login" value="<?php echo esc($r['user_login']); ?>" required>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Статус</label>
+                                                        <select name="is_active">
+                                                            <option value="1" <?php echo $r['is_active']?'selected':''; ?>>Активен</option>
+                                                            <option value="0" <?php echo !$r['is_active']?'selected':''; ?>>Неактивен</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div class="tools">
+                                                    <button class="btn btn-primary" name="update_record">Сохранить</button>
+                                                    <button class="btn" type="button" onclick="toggleEditForm('<?php echo (int)$r['id']; ?>')">Отмена</button>
+                                                </div>
+
+                                            <?php elseif ($active_tab==='mentorship' || $active_tab==='seniority'):
+                                                $allowed = allowed_percents_15(); ?>
+                                                <input type="hidden" name="scope" value="results">
+                                                <input type="hidden" name="table" value="<?php echo $active_tab==='mentorship'?'mentorship_results':'seniority_results'; ?>">
+                                                <input type="hidden" name="record_id" value="<?php echo (int)$r['id']; ?>">
+                                                <div class="form-row">
+                                                    <div class="form-group">
+                                                        <label>Логин пользователя</label>
+                                                        <input type="text" name="user_login" value="<?php echo esc($r['user_login']); ?>" required>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Процент</label>
+                                                        <select name="score">
+                                                            <?php foreach ($allowed as $p): ?>
+                                                                <option value="<?php echo $p; ?>" <?php echo ((int)$r['score']===$p)?'selected':''; ?>><?php echo $p; ?>%</option>
+                                                            <?php endforeach; ?>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div class="form-row">
+                                                    <div class="form-group">
+                                                        <label>Время (сек)</label>
+                                                        <input type="number" name="time_spent" value="<?php echo (int)$r['time_spent']; ?>" required>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Номер попытки</label>
+                                                        <input type="number" name="attempt_number" value="<?php echo (int)$r['attempt_number']; ?>" required>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Дата теста</label>
+                                                    <input type="datetime-local" name="test_date" value="<?php echo esc(date('Y-m-d\TH:i', strtotime($r['test_date']))); ?>">
+                                                </div>
+                                                <div class="tools">
+                                                    <button class="btn btn-primary" name="update_record">Сохранить</button>
+                                                    <button class="btn" type="button" onclick="toggleEditForm('<?php echo (int)$r['id']; ?>')">Отмена</button>
+                                                </div>
+
+                                            <?php elseif ($active_tab==='tests'):
+                                                $m = $testsModels[$tests_key]; ?>
+                                                <input type="hidden" name="scope" value="tests">
+                                                <input type="hidden" name="t" value="<?php echo esc($tests_key); ?>">
+                                                <input type="hidden" name="record_pk" value="<?php echo esc($r['pk']); ?>">
+                                                <div class="form-row">
+                                                    <?php foreach ($m['columns'] as $c):
+                                                        $type = $m['types'][$c] ?? 'text';
+                                                        $label = $m['labels'][$c] ?? $c;
+                                                        $val = $r[$c] ?? ''; ?>
+                                                        <div class="form-group">
+                                                            <label><?php echo esc($label); ?></label>
+                                                            <?php if ($type==='datetime'): ?>
+                                                                <input type="datetime-local" name="<?php echo esc($c); ?>" value="<?php echo $val?esc(date('Y-m-d\TH:i', strtotime($val))):''; ?>">
+                                                            <?php elseif ($type==='int'): ?>
+                                                                <input type="number" name="<?php echo esc($c); ?>" value="<?php echo esc($val); ?>">
+                                                            <?php elseif ($type==='longtext'): ?>
+                                                                <textarea name="<?php echo esc($c); ?>"><?php echo esc($val); ?></textarea>
+                                                            <?php else: ?>
+                                                                <input type="text" name="<?php echo esc($c); ?>" value="<?php echo esc($val); ?>">
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                                <div class="tools">
+                                                    <button class="btn btn-primary" name="update_test">Сохранить</button>
+                                                    <button class="btn" type="button" onclick="toggleEditForm('<?php echo esc($r['pk']); ?>')">Отмена</button>
+                                                </div>
+
+                                            <?php elseif ($active_tab==='xtvr'):
+                                                $m = $xtvrModels[$xtvr_key]; ?>
+                                                <input type="hidden" name="scope" value="xtvr">
+                                                <input type="hidden" name="x" value="<?php echo esc($xtvr_key); ?>">
+                                                <input type="hidden" name="record_pk" value="<?php echo esc($r['pk']); ?>">
+                                                <div class="form-row">
+                                                    <?php foreach ($m['columns'] as $c):
+                                                        $type = $m['types'][$c] ?? 'text';
+                                                        $label = $m['labels'][$c] ?? $c;
+                                                        $val = $r[$c] ?? ''; ?>
+                                                        <div class="form-group">
+                                                            <label><?php echo esc($label); ?></label>
+                                                            <?php if ($type==='datetime'): ?>
+                                                                <input type="datetime-local" name="<?php echo esc($c); ?>" value="<?php echo $val?esc(date('Y-m-d\TH:i', strtotime($val))):''; ?>">
+                                                            <?php elseif ($type==='int'): ?>
+                                                                <input type="number" name="<?php echo esc($c); ?>" value="<?php echo esc($val); ?>">
+                                                            <?php elseif ($type==='longtext'): ?>
+                                                                <textarea name="<?php echo esc($c); ?>"><?php echo esc($val); ?></textarea>
+                                                            <?php else: ?>
+                                                                <input type="text" name="<?php echo esc($c); ?>" value="<?php echo esc($val); ?>">
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                                <div class="tools">
+                                                    <button class="btn btn-primary" name="update_xtvr">Сохранить</button>
+                                                    <button class="btn" type="button" onclick="toggleEditForm('<?php echo esc($r['pk']); ?>')">Отмена</button>
+                                                </div>
+
+                                            <?php else:
+                                                $metaE = tpa_table_meta($linkTPA,$tpa_tbl); ?>
+                                                <input type="hidden" name="scope" value="tpatb">
+                                                <input type="hidden" name="p" value="<?php echo esc($tpa_tbl); ?>">
+                                                <?php if ($metaE['pk']): ?>
+                                                    <input type="hidden" name="record_pk" value="<?php echo esc($r[$metaE['pk']]); ?>">
+                                                <?php endif; ?>
+                                                <div class="form-row">
+                                                    <?php foreach (array_keys($metaE['columns']) as $c):
+                                                        $info = $metaE['columns'][$c]; $type=$info['type']; $val = $r[$c] ?? ''; ?>
+                                                        <div class="form-group">
+                                                            <label><?php echo esc($c); ?><?php echo ($metaE['pk']===$c)?' (PK)':''; ?></label>
+                                                            <?php if ($metaE['pk']===$c): ?>
+                                                                <input type="text" value="<?php echo esc($val); ?>" disabled>
+                                                            <?php else: ?>
+                                                                <?php if (is_dt_type($type)): ?>
+                                                                    <input type="datetime-local" name="<?php echo esc($c); ?>" value="<?php echo $val?esc(date('Y-m-d\TH:i', strtotime($val))):''; ?>">
+                                                                <?php elseif (is_int_type($type) || is_float_type($type)): ?>
+                                                                    <input type="number" step="<?php echo is_float_type($type)?'0.01':'1'; ?>" name="<?php echo esc($c); ?>" value="<?php echo esc($val); ?>">
+                                                                <?php else: ?>
+                                                                    <input type="text" name="<?php echo esc($c); ?>" value="<?php echo esc($val); ?>">
+                                                                <?php endif; ?>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                                <div class="tools">
+                                                    <button class="btn btn-primary" name="update_tpa">Сохранить</button>
+                                                    <button class="btn" type="button" onclick="toggleEditForm('<?php echo esc($r['pk'] ?? $r['id']); ?>')">Отмена</button>
+                                                </div>
+                                            <?php endif; ?>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; endif; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination">
+                <?php
+                $build = function($p) use($active_tab,$tests_key,$xtvr_key,$tpa_tbl,$sort,$dir,$q,$fromDate,$toDate){
+                    $params = ['tab'=>$active_tab,'page'=>$p,'sort'=>$sort,'dir'=>$dir];
+                    if ($q!=='') $params['q']=$q;
+                    if ($fromDate!=='') $params['from']=$fromDate;
+                    if ($toDate!=='') $params['to']=$toDate;
+                    if ($active_tab==='tests') $params['t']=$tests_key;
+                    if ($active_tab==='xtvr')  $params['x']=$xtvr_key;
+                    if ($active_tab==='tpatb') $params['p']=$tpa_tbl;
+                    return $_SERVER['PHP_SELF'].'?'.http_build_query($params);
+                };
+                $window=2;
+                if ($page>1) echo '<a class="page" href="'.$build($page-1).'">Назад</a>';
+                $start=max(1,$page-$window); $end=min($totalPages,$page+$window);
+                if ($start>1) echo '<a class="page" href="'.$build(1).'">1</a>'.($start>2?'<span class="page">…</span>':'');
+                for($i=$start;$i<=$end;$i++) echo '<a class="page '.($i==$page?'active':'').'" href="'.$build($i).'">'.$i.'</a>';
+                if ($end<$totalPages) echo ($end<$totalPages-1?'<span class="page">…</span>':'').'<a class="page" href="'.$build($totalPages).'">'.$totalPages.'</a>';
+                if ($page<$totalPages) echo '<a class="page" href="'.$build($page+1).'">Вперёд</a>';
+                ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function goTab(tab){
+    const u=new URL(location.href);
+    u.searchParams.set('tab',tab);
+    // сброс подтабов
+    if(tab!=='tests') u.searchParams.delete('t');
+    if(tab!=='xtvr')  u.searchParams.delete('x');
+    if(tab!=='tpatb') u.searchParams.delete('p');
+    u.searchParams.set('page','1');
+    location.href=u.toString();
+}
+function clickSort(key){
+    const u=new URL(location.href);
+    const cur=u.searchParams.get('sort')||'';
+    let dir=u.searchParams.get('dir')||'desc';
+    if(cur===key){ dir = (dir==='asc'?'desc':'asc'); } else { dir='asc'; }
+    u.searchParams.set('sort',key);
+    u.searchParams.set('dir',dir);
+    u.searchParams.set('page','1');
+    location.href=u.toString();
+}
+function toggleAddForm(){
+    const f=document.getElementById('addForm');
+    if(!f) return;
+    f.style.display = (f.style.display==='block') ? 'none' : 'block';
+}
+function toggleEditForm(id){
+    const row=document.getElementById('edit-'+id);
+    if(!row) return;
+    row.style.display = (row.style.display==='table-row') ? 'none' : 'table-row';
+}
+document.addEventListener('DOMContentLoaded',function(){
+    document.querySelectorAll('.edit-form').forEach(el=>{ if(!el.id.startsWith('addForm')) el.style.display='none'; });
+});
+</script>
+</body>
+</html>
